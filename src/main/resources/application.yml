@@ -1,0 +1,23 @@
+server:
+  port: 8081
+
+spring:
+  datasource:
+    url: jdbc:mysql://192.168.56.102:3306/region_lis?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai
+    username: root
+    password: 123456
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      host: 192.168.56.102
+      port: 6379
+      database: 0
+      timeout: 3000ms
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+logging:
+  file:
+    name: logs/region-lis.log
+  level:
+    com.region.lis: INFO
