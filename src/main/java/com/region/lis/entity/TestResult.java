@@ -1,8 +1,6 @@
 package com.region.lis.entity;
 
-import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableId;
-import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -14,8 +12,10 @@ public class TestResult {
     private Long id;
     private String orderNo;
     private String resultValue;
-    private String reportUrl;
+    // 状态枚举：TestResultStatus.PENDING/RETURNED/CONFIRMED
     private Integer status;
+
+    @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
     private Integer isCritical;       // 新增：是否危机值 0否 1是
     private String criticalLevel;     // 新增：危机程度

@@ -1,8 +1,6 @@
 package com.region.lis.entity;
 
-import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableId;
-import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -19,5 +17,6 @@ public class AuditLog {
     private Integer responseCode;
     private String ip;
     private Long costTime;
+    @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
 }

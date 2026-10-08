@@ -31,3 +31,13 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Logs（含患者姓名/身份证等敏感数据，禁止入库）###
+logs/
+*.log
+*.log.gz
+
+### 本地敏感配置 ###
+.env
+.env.local
+application-local.yml

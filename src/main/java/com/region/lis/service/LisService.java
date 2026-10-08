@@ -13,6 +13,9 @@ import com.region.lis.mapper.ReportMapper;
 import com.region.lis.mapper.TestItemMappingMapper;
 import com.region.lis.mapper.TestOrderMapper;
 import com.region.lis.mapper.TestResultMapper;
+import com.region.lis.enums.ReportStatus;
+import com.region.lis.enums.TestOrderStatus;
+import com.region.lis.enums.TestResultStatus;
 import com.region.lis.util.DesensitizeUtil;
 import com.region.lis.util.RequestUtil;
 import lombok.extern.slf4j.Slf4j;
@@ -39,6 +42,7 @@ public class LisService {
     /**
      * 乡镇卫生院上传医嘱（接收参数）
      */
+    @Transactional(rollbackFor = Exception.class)
     public Result<String> upload(OrderUploadDTO dto) {
         // 1. 校验参数
         if (dto.getOrderNo() == null || dto.getTownshipId() == null) {
@@ -72,7 +76,7 @@ public class LisService {
         order.setTownshipId(dto.getTownshipId());
         order.setItemCode(dto.getItemCode());
         order.setCountyCode(mapping.getCountyCode());
-        order.setStatus(0);
+        order.setStatus(TestOrderStatus.PENDING.getCode());
         order.setRetryCount(0);
         testOrderMapper.insert(order);
 
@@ -85,7 +89,7 @@ public class LisService {
                 order.getOrderNo(), mapping.getCountyCode(), order.getPatientName()
         );
 
-        order.setStatus(success ? 1 : 4);
+        order.setStatus(success ? TestOrderStatus.PUSHED.getCode() : TestOrderStatus.FAILED.getCode());
         testOrderMapper.updateById(order);
 
         // 7. 日志：转发
@@ -98,6 +102,7 @@ public class LisService {
     /**
      * 批量上传
      */
+    @Transactional(rollbackFor = Exception.class)
     public Result<String> uploadBatch(List<OrderUploadDTO> list) {
         int success = 0, fail = 0;
         for (OrderUploadDTO dto : list) {
@@ -111,11 +116,13 @@ public class LisService {
         return Result.success("成功" + success + "条，失败" + fail + "条");
     }
     /**
-     * 第一步：项目对码 + 上传医嘱
+     * 第一步：项目对码 + 上传医嘱（遗留方法，建议逐步废弃）
      */
+    @Transactional(rollbackFor = Exception.class)
     public Result<String> uploadOrders() {
         List<TestOrder> orders = testOrderMapper.selectList(
-                new LambdaQueryWrapper<TestOrder>().eq(TestOrder::getStatus, 0)
+                new LambdaQueryWrapper<TestOrder>()
+                        .eq(TestOrder::getStatus, TestOrderStatus.PENDING.getCode())
         );
 
         for (TestOrder order : orders) {
@@ -133,7 +140,7 @@ public class LisService {
 
             if (mapping == null) {
                 log.error("❌ 项目未对码：{}", order.getItemCode());
-                order.setStatus(4);
+                order.setStatus(TestOrderStatus.FAILED.getCode());
                 testOrderMapper.updateById(order);
                 logService.record("转发", order.getOrderNo(), null,
                         "系统", "项目未对码：" + order.getItemCode(),  RequestUtil.getIp());
@@ -148,7 +155,7 @@ public class LisService {
                     order.getOrderNo(), mapping.getCountyCode(), order.getPatientName()
             );
 
-            order.setStatus(success ? 1 : 4);
+            order.setStatus(success ? TestOrderStatus.PUSHED.getCode() : TestOrderStatus.FAILED.getCode());
             testOrderMapper.updateById(order);
 
             // 日志：转发
@@ -165,7 +172,8 @@ public class LisService {
     @Transactional
     public Result<String> syncResults() {
         List<TestOrder> orders = testOrderMapper.selectList(
-                new LambdaQueryWrapper<TestOrder>().eq(TestOrder::getStatus, 1)
+                new LambdaQueryWrapper<TestOrder>()
+                        .eq(TestOrder::getStatus, TestOrderStatus.PUSHED.getCode())
         );
 
         // 合管：同一患者、同一卫生院，合并出报告
@@ -189,7 +197,7 @@ public class LisService {
             report.setOrderNos(group.stream().map(TestOrder::getOrderNo).collect(Collectors.joining(",")));
             report.setPatientName(group.get(0).getPatientName());
             report.setTownshipId(group.get(0).getTownshipId());
-            report.setStatus(0);
+            report.setStatus(ReportStatus.PENDING.getCode());
 //            report.setReportImageUrl("/report/" + p1);
             report.setReportImageUrl("/report/p1.png");
 
@@ -207,7 +215,7 @@ public class LisService {
                     log.info("结果已存在,只修改状态，跳过重复插入：orderNo={}", order.getOrderNo());
 
                     order.setReportId(report.getReportId());
-                    order.setStatus(2);
+                    order.setStatus(TestOrderStatus.TESTED.getCode());
                     testOrderMapper.updateById(order);
 
                     continue;
@@ -224,11 +232,6 @@ public class LisService {
 
 
                 testResultMapper.insert(tr);
-// ===== 临时事务测试代码 =====
-//                if ("ORD004".equals(order.getOrderNo())) {
-//                    throw new RuntimeException("事务测试：ORD004故意失败");
-//                }
-// ===== 测试代码结束 =====
                 // 危机值告警
                 if (tr.getIsCritical() == 1) {
                     log.error("🚨 危机值告警：医嘱={}, 结果={}", order.getOrderNo(), result);
@@ -238,9 +241,7 @@ public class LisService {
 
 //                order.setReportId(String.valueOf(report.getId()));
                 order.setReportId(report.getReportId());
-//                System.out.println(String.valueOf(report.getId())+order.getId());
-//                log.info(String.valueOf(report.getId()) + order.getId());
-                order.setStatus(2);
+                order.setStatus(TestOrderStatus.TESTED.getCode());
                 testOrderMapper.updateById(order);
 
                 // 日志：接收报告
@@ -252,89 +253,15 @@ public class LisService {
     }
 
     /**
-     * 第三步：结果回传乡镇，统一JSON
+     * 第三步：结果回传乡镇，统一JSON（内存组装，避免 N+1）
      */
-    public Result<String> returnResults11() {
-        List<TestResult> results = testResultMapper.selectList(
-                new LambdaQueryWrapper<TestResult>().eq(TestResult::getStatus, 0)
-        );
-
-        for (TestResult result : results) {
-            // 构造统一JSON
-            Map<String, Object> json = new HashMap<>();
-            json.put("orderNo", result.getOrderNo());
-            json.put("resultValue", result.getResultValue());
-            json.put("isCritical", result.getIsCritical());
-            json.put("reportImageUrl", "/images/" + result.getOrderNo() + ".jpg");
-
-            log.info("📥 回传乡镇卫生院：{}", json);
-
-            result.setStatus(1);
-            testResultMapper.updateById(result);
-
-            // 日志：回写乡镇
-            logService.record("回写乡镇", result.getOrderNo(), null,
-                    "系统", "回写结果", RequestUtil.getIp());
-
-            System.out.println(json.toString()+"日志：回写乡镇");
-        }
-        return Result.success("回传完成");
-    }
-    public Result<List<Map<String, Object>>> returnResults12() {
-        List<TestResult> results = testResultMapper.selectList(
-                new LambdaQueryWrapper<TestResult>().eq(TestResult::getStatus, 0)
-        );
-
-        List<Map<String, Object>> returnList = new ArrayList<>();
-
-        for (TestResult result : results) {
-            // 查医嘱，拿患者信息
-            TestOrder order = testOrderMapper.selectOne(
-                    new LambdaQueryWrapper<TestOrder>()
-                            .eq(TestOrder::getOrderNo, result.getOrderNo())
-            );
-
-            // 构造返回 JSON
-            Map<String, Object> json = new HashMap<>();
-            json.put("orderNo", result.getOrderNo());
-            json.put("resultValue", result.getResultValue());
-            json.put("isCritical", result.getIsCritical());
-//            json.put("reportImageUrl", "/images/" + result.getOrderNo() + ".jpg");
-//            json.put("reportImageUrl", "/images/" +   result.getReportUrl() + ".jpg");
-            Report report = reportMapper.selectOne(
-                    new LambdaQueryWrapper<Report>()
-                            .eq(Report::getReportId, order.getReportId())
-            );
-
-            json.put("reportImageUrl", report != null ? report.getReportImageUrl() : null);
-            // 患者信息脱敏
-            if (order != null) {
-                Map<String, Object> patient = new HashMap<>();
-                patient.put("name", DesensitizeUtil.name(order.getPatientName()));
-                patient.put("idCard", DesensitizeUtil.idCard(order.getIdCard()));
-                patient.put("phone", DesensitizeUtil.phone(order.getPhone()));
-                json.put("patient", patient);
-            }
-
-            returnList.add(json);
-
-            // 更新状态
-            result.setStatus(1);
-            testResultMapper.updateById(result);
-
-            // 日志
-            logService.record("回写乡镇", result.getOrderNo(), null,
-                    "系统", "回写结果", RequestUtil.getIp());
-        }
-
-        return Result.success(returnList);
-    }
+    @Transactional(rollbackFor = Exception.class)
     public Result<List<Map<String, Object>>> returnResults() {
 
         // 1. 一次查询所有待回写结果
         List<TestResult> results = testResultMapper.selectList(
                 new LambdaQueryWrapper<TestResult>()
-                        .eq(TestResult::getStatus, 0)
+                        .eq(TestResult::getStatus, TestResultStatus.PENDING.getCode())
         );
 
         if (results.isEmpty()) {
@@ -421,7 +348,7 @@ public class LisService {
             returnList.add(json);
 
             // 更新回写状态
-            result.setStatus(1);
+            result.setStatus(TestResultStatus.RETURNED.getCode());
             testResultMapper.updateById(result);
 
             logService.record(

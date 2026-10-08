@@ -1,0 +1,26 @@
+# 开发环境配置。敏感值一律来自环境变量，不在代码库中存放真实凭据。
+# 本地启动示例（PowerShell）：
+#   $env:MYSQL_PASSWORD="***"      # 开发库口令
+#   $env:REDIS_HOST="192.168.56.102"
+#   .\mvnw.cmd spring-boot:run
+spring:
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:192.168.56.102}:${MYSQL_PORT:3306}/${MYSQL_DB:region_lis}?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai
+    username: ${MYSQL_USERNAME:root}
+    password: 123456
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      host: ${REDIS_HOST:192.168.56.102}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DB:0}
+      timeout: 3000ms
+
+logging:
+  level:
+    com.region.lis: DEBUG
+
+security:
+  # 开发环境默认给一个管理员机构，便于联调 /auth/reset-password
+  admin-org-codes: ${SECURITY_ADMIN_ORG_CODES:ADMIN01}

@@ -2,6 +2,7 @@ package com.region.lis.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.region.lis.common.Result;
+import com.region.lis.config.SecurityProperties;
 import com.region.lis.entity.OrgAccount;
 import com.region.lis.mapper.OrgAccountMapper;
 import com.region.lis.service.PermissionService;
@@ -29,6 +30,9 @@ public class AuthController {
     private OrgAccountMapper orgAccountMapper;
     @Autowired
     private PermissionService permissionService;
+
+    @Autowired
+    private SecurityProperties securityProperties;
 
     @Autowired
     private StringRedisTemplate stringRedisTemplate;
@@ -153,15 +157,24 @@ public class AuthController {
 
         return Result.success("密码修改成功，请重新登录");
     }
+    /**
+     * 管理员重置他机构密码。
+     * 调用方必须携带有效 Token，且其机构编码在 security.admin-org-codes 名单内；
+     * 名单为空时 isAdminOrg 恒为 false，即拒绝所有调用（fail-close）。
+     */
     @PostMapping("/reset-password")
-    public Result<String> resetPassword(@RequestParam String orgCode,
+    public Result<String> resetPassword(@RequestHeader("Authorization") String token,
+                                        @RequestParam String orgCode,
                                         @RequestParam String newPassword
-//            ,
-//                                        @RequestParam String adminKey
     ) {
-//        if (!"ADMIN_SECRET_KEY".equals(adminKey)) {
-//            return Result.fail(403, "无权限");
-//        }
+        String callerOrgCode = tokenService.getOrgCode(token);
+        if (callerOrgCode == null) {
+            return Result.fail(401, "Token无效");
+        }
+        if (!securityProperties.isAdminOrg(callerOrgCode)) {
+            log.warn("🚫 拒绝重置密码：调用方机构={} 非管理员机构，目标机构={}", callerOrgCode, orgCode);
+            return Result.fail(403, "无权限重置其他机构密码");
+        }
 
         OrgAccount account = orgAccountMapper.selectOne(
                 new LambdaQueryWrapper<OrgAccount>().eq(OrgAccount::getOrgCode, orgCode)
@@ -179,6 +192,7 @@ public class AuthController {
         account.setFailCount(0);
         orgAccountMapper.updateById(account);
 
+        log.info("✅ 管理员重置密码：操作方={}, 目标机构={}", callerOrgCode, orgCode);
         return Result.success("密码重置成功");
     }
     @GetMapping("/current")

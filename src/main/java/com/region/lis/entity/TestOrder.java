@@ -1,8 +1,6 @@
 package com.region.lis.entity;
 
-import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableId;
-import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -21,7 +19,10 @@ public class TestOrder {
     private String countyCode;
     private String  reportId;        // 新增：关联报告ID
 
+    // 状态枚举：TestOrderStatus.PENDING/PUSHED/TESTED/RETURNED/FAILED/CANCELLED
     private Integer status;
     private Integer retryCount;
+
+    @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
 }

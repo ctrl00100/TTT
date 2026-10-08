@@ -51,7 +51,7 @@ public class WebConfig implements WebMvcConfigurer {
                 .excludePathPatterns(
                         "/auth/login",
                         "/auth/register",
-                        "/auth/reset-password",
+                        // /auth/reset-password 为管理员接口，必须鉴权，不再放行
                         "/report/**",       // ← 放行 report 目录下的图片
 
                         "/error"

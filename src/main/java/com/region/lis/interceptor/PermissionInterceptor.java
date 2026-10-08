@@ -1,6 +1,7 @@
 package com.region.lis.interceptor;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.region.lis.config.SecurityProperties;
 import com.region.lis.entity.SysPermission;
 import com.region.lis.mapper.SysPermissionMapper;
 import com.region.lis.service.TokenService;
@@ -20,6 +21,7 @@ public class PermissionInterceptor implements HandlerInterceptor {
     @Autowired private StringRedisTemplate stringRedisTemplate;
     @Autowired private SysPermissionMapper sysPermissionMapper;
     @Autowired private TokenService tokenService;
+    @Autowired private SecurityProperties securityProperties;
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
@@ -33,8 +35,13 @@ public class PermissionInterceptor implements HandlerInterceptor {
                 .eq(SysPermission::getMethod, method)
         );
 
-        // 接口没配权限，直接放行
+        // 接口没配权限：命中强制鉴权清单的一律拒绝（fail-close），
+        // 避免“漏配权限记录 = 接口默认对外开放”
         if (perm == null) {
+            if (securityProperties.isFailClosePath(uri)) {
+                log.warn("🚫 拒绝访问：接口 {} {} 未配置权限记录，且属于强制鉴权清单", method, uri);
+                return writeError(response, 403, "无权限访问：接口未配置权限");
+            }
             return true;
         }
 

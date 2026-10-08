@@ -1,8 +1,6 @@
 package com.region.lis.entity;
 
-import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableId;
-import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -17,6 +15,9 @@ public class Report {
     private String patientName;
     private String townshipId;
     private String reportImageUrl;  // 报告图片地址
-    private Integer status;         // 0待回传 1已回传
+    // 状态枚举：ReportStatus.PENDING/RETURNED
+    private Integer status;
+
+    @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
 }
