@@ -198,7 +198,20 @@ public class LisService {
             for (TestOrder order : group) {
                 // 模拟LIS出结果
                 String result = countyLisClient.getResult(order.getOrderNo());
+                TestResult exist = testResultMapper.selectOne(
+                        new LambdaQueryWrapper<TestResult>()
+                                .eq(TestResult::getOrderNo, order.getOrderNo())
+                );
 
+                if (exist != null) {
+                    log.info("结果已存在,只修改状态，跳过重复插入：orderNo={}", order.getOrderNo());
+
+                    order.setReportId(report.getReportId());
+                    order.setStatus(2);
+                    testOrderMapper.updateById(order);
+
+                    continue;
+                }
                 TestResult tr = new TestResult();
                 tr.setOrderNo(order.getOrderNo());
                 tr.setResultValue(result);
@@ -208,6 +221,8 @@ public class LisService {
                 String hrFlag = hrService.judgeHrFlag(order.getCountyCode(), result, tr.getIsCritical());
                 tr.setHrFlag(hrFlag);
                 tr.setHrReason(hrService.getHrReason(hrFlag, tr.getIsCritical()));
+
+
                 testResultMapper.insert(tr);
 // ===== 临时事务测试代码 =====
 //                if ("ORD004".equals(order.getOrderNo())) {
