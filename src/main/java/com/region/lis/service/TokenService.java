@@ -35,7 +35,7 @@ public class TokenService {
         stringRedisTemplate.opsForValue().set(key, orgCode, EXPIRE_MINUTES, TimeUnit.MINUTES);
 //        stringRedisTemplate.opsForValue().set("lis:token:" + token, orgCode, 30, TimeUnit.MINUTES);
 
-        log.info("🔑 生成Token：机构={}, token={}", orgCode, token);
+        log.info("🔑 生成Token：机构={}, token={}", orgCode, "token");
         return token;
     }
 

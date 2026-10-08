@@ -18,6 +18,7 @@ import com.region.lis.util.RequestUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -161,18 +162,27 @@ public class LisService {
     /**
      * 第二步：合管检验 + 危机值判断
      */
+    @Transactional
     public Result<String> syncResults() {
         List<TestOrder> orders = testOrderMapper.selectList(
                 new LambdaQueryWrapper<TestOrder>().eq(TestOrder::getStatus, 1)
         );
 
         // 合管：同一患者、同一卫生院，合并出报告
+//        Map<String, List<TestOrder>> grouped = orders.stream()
+//                .collect(Collectors.groupingBy(o -> o.getPatientName() + "_" + o.getTownshipId()));
         Map<String, List<TestOrder>> grouped = orders.stream()
-                .collect(Collectors.groupingBy(o -> o.getPatientName() + "_" + o.getTownshipId()));
-
+                .collect(Collectors.groupingBy(
+                        o -> buildPatientGroupKey(
+                                o.getIdCard(),
+                                o.getTownshipId()
+                        )
+                ));
         for (Map.Entry<String, List<TestOrder>> entry : grouped.entrySet()) {
             List<TestOrder> group = entry.getValue();
-            System.out.println(entry.toString());
+//            System.out.println(entry.toString());
+            log.info("开始处理合管组：key={}, 医嘱数量={}", entry.getKey(), group.size());
+//            log.info(entry.toString());
             // 生成报告
             Report report = new Report();
             report.setReportId("RPT" + System.currentTimeMillis());
@@ -199,7 +209,11 @@ public class LisService {
                 tr.setHrFlag(hrFlag);
                 tr.setHrReason(hrService.getHrReason(hrFlag, tr.getIsCritical()));
                 testResultMapper.insert(tr);
-
+// ===== 临时事务测试代码 =====
+//                if ("ORD004".equals(order.getOrderNo())) {
+//                    throw new RuntimeException("事务测试：ORD004故意失败");
+//                }
+// ===== 测试代码结束 =====
                 // 危机值告警
                 if (tr.getIsCritical() == 1) {
                     log.error("🚨 危机值告警：医嘱={}, 结果={}", order.getOrderNo(), result);
@@ -207,9 +221,10 @@ public class LisService {
                             "系统", "危机值告警：" + result, RequestUtil.getIp());
                 }
 
-                order.setReportId(String.valueOf(report.getId()));
-                System.out.println(String.valueOf(report.getId())+order.getId());
-
+//                order.setReportId(String.valueOf(report.getId()));
+                order.setReportId(report.getReportId());
+//                System.out.println(String.valueOf(report.getId())+order.getId());
+//                log.info(String.valueOf(report.getId()) + order.getId());
                 order.setStatus(2);
                 testOrderMapper.updateById(order);
 
@@ -250,7 +265,7 @@ public class LisService {
         }
         return Result.success("回传完成");
     }
-    public Result<List<Map<String, Object>>> returnResults() {
+    public Result<List<Map<String, Object>>> returnResults12() {
         List<TestResult> results = testResultMapper.selectList(
                 new LambdaQueryWrapper<TestResult>().eq(TestResult::getStatus, 0)
         );
@@ -299,7 +314,113 @@ public class LisService {
 
         return Result.success(returnList);
     }
+    public Result<List<Map<String, Object>>> returnResults() {
 
+        // 1. 一次查询所有待回写结果
+        List<TestResult> results = testResultMapper.selectList(
+                new LambdaQueryWrapper<TestResult>()
+                        .eq(TestResult::getStatus, 0)
+        );
+
+        if (results.isEmpty()) {
+            return Result.success(new ArrayList<>());
+        }
+
+        // 2. 一次性查询所有相关医嘱
+        List<String> orderNos = results.stream()
+                .map(TestResult::getOrderNo)
+                .filter(orderNo -> orderNo != null && !orderNo.isBlank())
+                .distinct()
+                .collect(Collectors.toList());
+
+        List<TestOrder> orders = testOrderMapper.selectList(
+                new LambdaQueryWrapper<TestOrder>()
+                        .in(TestOrder::getOrderNo, orderNos)
+        );
+
+        // 3. 转成 Map，后面通过 orderNo 直接查，不再访问数据库
+        Map<String, TestOrder> orderMap = orders.stream()
+                .collect(Collectors.toMap(
+                        TestOrder::getOrderNo,
+                        order -> order,
+                        (a, b) -> a
+                ));
+
+        // 4. 收集所有 reportId
+        List<String> reportIds = orders.stream()
+                .map(TestOrder::getReportId)
+                .filter(reportId -> reportId != null && !reportId.isBlank())
+                .distinct()
+                .collect(Collectors.toList());
+
+        // 5. 一次性查询所有报告
+        List<Report> reports = reportIds.isEmpty()
+                ? new ArrayList<>()
+                : reportMapper.selectList(
+                new LambdaQueryWrapper<Report>()
+                        .in(Report::getReportId, reportIds)
+        );
+
+        // 6. 转成 Map，后面通过 reportId 直接查
+        Map<String, Report> reportMap = reports.stream()
+                .collect(Collectors.toMap(
+                        Report::getReportId,
+                        report -> report,
+                        (a, b) -> a
+                ));
+
+        List<Map<String, Object>> returnList = new ArrayList<>();
+
+        // 7. 内存组装结果，不再循环查询数据库
+        for (TestResult result : results) {
+
+            TestOrder order = orderMap.get(result.getOrderNo());
+
+            Map<String, Object> json = new HashMap<>();
+            json.put("orderNo", result.getOrderNo());
+            json.put("resultValue", result.getResultValue());
+            json.put("isCritical", result.getIsCritical());
+
+            if (order != null) {
+
+                Report report = reportMap.get(order.getReportId());
+
+                json.put(
+                        "reportImageUrl",
+
+                        report != null ? report.getReportImageUrl() : null
+                );
+
+                Map<String, Object> patient = new HashMap<>();
+                patient.put("name", DesensitizeUtil.name(order.getPatientName()));
+                patient.put("idCard", DesensitizeUtil.idCard(order.getIdCard()));
+                patient.put("phone", DesensitizeUtil.phone(order.getPhone()));
+
+                json.put("patient", patient);
+
+            } else {
+                // 找不到医嘱时，也不要让整个回写任务直接 NPE
+                json.put("reportImageUrl", null);
+            }
+
+            returnList.add(json);
+
+            // 更新回写状态
+            result.setStatus(1);
+            testResultMapper.updateById(result);
+
+            logService.record(
+                    "回写乡镇",
+                    result.getOrderNo(),
+                    order != null ? order.getReportId() : null,
+                    "系统",
+                    "回写结果",
+                    RequestUtil.getIp()
+            );
+        }
+
+        return Result.success(returnList);
+    }
     /**
      * 构造脱敏后的患者信息
      */
@@ -309,5 +430,19 @@ public class LisService {
         patient.put("idCard", DesensitizeUtil.idCard(order.getIdCard()));
         patient.put("phone", DesensitizeUtil.phone(order.getPhone()));
         return patient;
+    }
+
+
+    private String buildPatientGroupKey(String idCard, String townshipId) {
+
+        if (idCard == null || idCard.isBlank()) {
+            throw new IllegalArgumentException("患者身份证号不能为空");
+        }
+
+        if (townshipId == null || townshipId.isBlank()) {
+            throw new IllegalArgumentException("卫生院ID不能为空");
+        }
+
+        return idCard + "_" + townshipId;
     }
 }
